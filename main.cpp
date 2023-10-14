@@ -204,12 +204,6 @@ class Junction{
 
 
 int main() {
-    //TODO: Integrate Timers into the main loop, in place of wait()
-    //TODO: Use SPI to connect two Mbeds, one for each Junction
-    //TODO: Implement BLE for monitoring state of the Intersection
-    //TODO: Use pointers for passing IO
-    //TODO: Create Update method for indicator
-
     //Junction setup. Creates two instances of a struct made for sending settings to the Junction class.
     JunctionParams j1p = {
         "Junction 1", //Junction Name
@@ -217,7 +211,7 @@ int main() {
         irTx_J1, // IR Transmitter
         irRx_J1, // IR Reciever
         ind_J1, // Sensor Indicator Lamp
-        0.5f, // Sensor Sensitivity
+        0.3f, // Sensor Sensitivity
         rLight_J1, //Traffic Signal Red Light
         gLight_J1 // Traffic Signal Green Light
     };
@@ -228,7 +222,7 @@ int main() {
         irTx_J2, // IR Transmitter
         irRx_J2, // IR Reciever
         ind_J2, // Sensor Indicator Lamp
-        0.5f, // Sensor Sensitivity
+        0.3f, // Sensor Sensitivity
         rLight_J2, //Traffic Signal Red Light
         gLight_J2 // Traffic Signal Green Light
     };
@@ -239,7 +233,7 @@ int main() {
 
     while(1){
         //Check Junction Two is Red
-        if(!(junctionTwo.isGreen())){
+        if((junctionOne.isGreen())){
             printf("Junction Two is Red\n");
             // If red, check if vehicle waiting
            if(junctionTwo.isVehicleWaiting()){
@@ -250,7 +244,7 @@ int main() {
                junctionTwo.changeGreen();
            }
         //Check Junction One is Red
-        } else if(!(junctionOne.isGreen())) {
+        } else if((junctionTwo.isGreen())) {
             printf("Junction One is Red\n");
             // If red, check if vehicle waiting
             if(junctionOne.isVehicleWaiting()){
