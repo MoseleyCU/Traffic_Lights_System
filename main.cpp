@@ -139,15 +139,25 @@ class Junction{
     string junctionName; //Name of the Junction, used for monitoring
     TL_Sensor sensor; //Instance of the Presence sensor object
     TL_Signal signal; //Instance of the Traffic Light Signals object
-    float junctionWaitLimit; // The length of time a vehicle needs to wait before triggering the lights
-    Timer junctionTimer; // Timer to register how long a vehicle has been waiting
+    Timer junctionTimer;
+    float junctionWaitLimit;
+    bool triggered;
+    bool previousState;
+    bool vehicleCounterStarted;
+    int surplusVehicleCount;
+    int surplusVehicleLimit;
+
 
     //Constructor
-    Junction(string _junctionName, float _junctionWaitLimit, DigitalOut* _irEmitter, AnalogIn* _irReceiver, DigitalOut* _indicatorLamp, float _sensitivity, DigitalOut* _redLight, DigitalOut* _greenLight)
+    Junction(string _junctionName, DigitalOut* _irEmitter, AnalogIn* _irReceiver, DigitalOut* _indicatorLamp, float _sensitivity, DigitalOut* _redLight, DigitalOut* _greenLight, float _junctionWaitLimit, int _surplusVehicleLimit)
         : junctionName(_junctionName)
-        , junctionWaitLimit(_junctionWaitLimit)
         , sensor(_irEmitter, _irReceiver, _indicatorLamp, _sensitivity)
-        , signal(_redLight,_greenLight){
+        , signal(_redLight,_greenLight)
+        , junctionWaitLimit(_junctionWaitLimit)
+        , surplusVehicleLimit(_surplusVehicleLimit){
+            triggered = false;
+            previousState = false;
+            surplusVehicleCount = 0;
     }
 
     // Accessible method to check state of Junction
@@ -156,21 +166,16 @@ class Junction{
     }
 
     bool isVehicleWaiting(){
-        printf("%s: Checking vehicle waiting\n", junctionName.c_str());
-
         //Check presence sensor
         if(sensor.checkForVehicle()){
             //Vehicle spotted
-            printf("%s: Vehicle spotted, check Timer\n", junctionName.c_str());
-
+            previousState = true;
             //Check if Timer started
             if((junctionTimer.read()==0)){
-                //If a vehicle shows up, start a timer.
-                printf("%s: Starting Timer...\n", junctionName.c_str());     
+                //If a vehicle shows up, start a timer.    
                 junctionTimer.start();
                 return false;
             } else if(junctionTimer.read()>junctionWaitLimit){
-                printf("%s: Vehicle waiting %0.2f\n", junctionName.c_str(), junctionTimer.read());
                 //Once the vehicle is confirmed waiting greater than time limit, reset the timer.
                 junctionTimer.stop();
                 junctionTimer.reset();
@@ -178,23 +183,108 @@ class Junction{
             } else {
                 return false;
             }
+
         } else {
+            if(previousState){
+                surplusVehicleCount++;
+                if(vehicleCounterStarted){
+                    bth.printf("%s: %i vehicles left to pass.\n",junctionName,(surplusVehicleLimit - surplusVehicleCount));
+                }
+                
+                previousState = false;
+            }
             //If there is no vehicle waiting any more, reset the timer.
-            printf("%s: No vehicle waiting.\n", junctionName.c_str());
             junctionTimer.stop();
             junctionTimer.reset();
+
             return false;
         }
     }
     void changeRed(){
-        signal.turnRed();
+        if(signal.isGreen){
+            signal.turnRed();
+            bth.printf("%s: Turned Red\n", junctionName);
+        }
+        
     }
     void changeGreen(){
-        signal.turnGreen();
+        if(!signal.isGreen){
+            signal.turnGreen();
+            bth.printf("%s: Turned Green\n", junctionName);
+            
+        }
+        
     }
- 
+    void startCounter(){
+        vehicleCounterStarted = true;
+        surplusVehicleCount = 0;
+    }
+    void stopCounter(){
+        vehicleCounterStarted = false;
+    }
 };
-void setup(){
+class PedestrianCrossing {
+    DigitalIn* pedSwitch;
+    DigitalOut* pedRedLight;
+    DigitalOut* pedGreenLight;
+    CharacterHexCodes character;
+    bool isGreen;
+
+    public:
+    PedestrianCrossing(DigitalIn* _pedSwitch, DigitalOut* _pedRedLight, DigitalOut* _pedGreenLight)
+    : pedSwitch(_pedSwitch)
+    , pedRedLight(_pedRedLight)
+    , pedGreenLight(_pedGreenLight){
+        isGreen = false;
+    }
+
+    bool isPedestrianWaiting(){
+        if (pedSwitch->read()){
+            bth.printf("Pedestrian Waiting.\n");
+            return true;
+        }
+        return false;
+    }
+    void changeGreen(){
+        *pedRedLight = 0;
+        *pedGreenLight = 1;
+        isGreen = true;
+        bth.printf("Pedestrian Crossing is Green\n");
+        startCountdown();
+        changeRed();
+
+    }
+    void changeRed(){
+        *pedGreenLight = 0;
+        *pedRedLight = 1;
+        isGreen = false;
+        bth.printf("Pedestrian Crossing is Red\n");
+    }
+    void startCountdown(){
+        bth.printf("Starting Pedestrian Countdown\n");
+        for(int i = 9;i>=0;i--){
+            switch (i){
+                case 9: segment = character.NINE; break;
+                case 8: segment = character.EIGHT; break;
+                case 7: segment = character.SEVEN; break;
+                case 6: segment = character.SIX; break;
+                case 5: segment = character.FIVE; break;
+                case 4: segment = character.FOUR; break;
+                case 3: segment = character.THREE; break;
+                case 2: segment = character.TWO; break;
+                case 1: segment = character.ONE; break;
+                case 0: segment = character.ZERO; break;
+                default:break;
+                
+            }
+            wait(1);
+        }
+        segment = 0xFF;
+    }
+};
+
+void startup(){
+    bth.printf("Starting up...\n");
     int setup = 1;
     int i = 0;
     while(setup){
@@ -215,66 +305,173 @@ void setup(){
         }
         wait(0.2);
     }
+    bth.printf("Start up complete.\n");
 }
 
 int main() {
 
     // Run start up diagnostics
-    setup();
+    startup();
+
+    float junctionWaitLimit = 0.5; // Minimum required time for a vehicle to be waiting at a junction before the safePassageTimer is started
 
     // Instatiate a Junction object for each Junction in the Intersection
     Junction junctionOne(
         "Junction 1", // Junction Name
-        2, // Junction Wait Limit (seconds)
         &irTx_J1, // IR Transmitter
         &irRx_J1, // IR Reciever
         &ind_J1, // Sensor Indicator Lamp
         0.3f, // Sensor Sensitivity
         &rLight_J1, // Traffic Signal Red Light
-        &gLight_J1 // Traffic Signal Green Light
+        &gLight_J1, // Traffic Signal Green Light
+        junctionWaitLimit, // min. Wait Time at Junction
+        5 // Surplus vehicle limit
     );
 
     Junction junctionTwo(
         "Junction 2", // Junction Name
-        5, // Junction Wait Limit (seconds)
         &irTx_J2, // IR Transmitter
         &irRx_J2, // IR Reciever
         &ind_J2, // Sensor Indicator Lamp
         0.3f, // Sensor Sensitivity
         &rLight_J2, // Traffic Signal Red Light
-        &gLight_J2 // Traffic Signal Green Light
+        &gLight_J2, // Traffic Signal Green Light
+        junctionWaitLimit, // min. Wait Time at Junction
+        4 // Surplus vehicle limit
     );
+
+    PedestrianCrossing ped(
+        &pedSwitch,
+        &pedRed,
+        &pedGreen
+    );
+
+    float safePassageTime = 30;
+    float transitionTime = 2;
+    float pedWaitLimit = 5;
+
+    Timer safePassageTimer;
+    Timer transitionTimer;
+    Timer pedTimer;
+
+    // Initial Start
+    pedRed = 1;
+    junctionTwo.changeRed();
+    junctionOne.changeGreen();
+
     while(1){
-        //Check Junction Two is Red
-        if((junctionOne.isGreen())){
-            bth.printf("Junction Two is Red\n");
-            // If red, check if vehicle waiting
-           if(junctionTwo.isVehicleWaiting()){
-               bth.printf("Vehicle waiting at junction two\n");
-               //If vehicle waiting, change lights.
-               junctionOne.changeRed();
-               wait(2); //Safety timer (TODO: Replace with timer)
-               junctionTwo.changeGreen();
-           }
-        //Check Junction One is Red
-        } else if((junctionTwo.isGreen())) {
-            bth.printf("Junction One is Red\n");
-            // If red, check if vehicle waiting
-            if(junctionOne.isVehicleWaiting()){
-                bth.printf("Vehicle waiting at junction two\n");
-                //If vehicle waiting, change lights.
-                junctionTwo.changeRed();
-                wait(2); //Safety timer (TODO: Replace with timer)
+        // If a vehicle is waiting (or has been seen waiting)
+        if(junctionOne.isVehicleWaiting() || junctionOne.triggered){
+      
+            // First check the junction isn't always green
+            if(!junctionOne.isGreen()){
+                bth.printf("Junction 1: Vehicle Waiting\n");
+                // if it isn't, make sure the other green comes to an end
+                if(safePassageTimer.read() > safePassageTime || (junctionTwo.vehicleCounterStarted && junctionTwo.surplusVehicleCount >= junctionTwo.surplusVehicleLimit)){
+
+                    // If it has, change junction
+                    junctionTwo.changeRed();
+
+                    // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
+                    junctionOne.triggered = true;
+                    
+
+                    // Before chaning green, make sure suitable time passed.
+                    if(transitionTimer.read()>transitionTime){
+
+                        // If so, change green
+                        junctionOne.changeGreen();
+                        // Reset Trigger
+                        junctionOne.triggered = false;
+
+                        //Reset Timers
+                        transitionTimer.stop();
+                        transitionTimer.reset();                    safePassageTimer.stop();
+                        safePassageTimer.reset();
+                        junctionTwo.stopCounter();
+
+                    } else if(transitionTimer.read()==0) {
+                        // If not, and the timer has not started, start it
+                        transitionTimer.start();
+                    }
+                } else if (safePassageTimer.read()==0){
+                    // If not, and the timer has not started, start it
+                    safePassageTimer.start();
+                }
+            }
+            if(junctionTwo.isGreen()){
+                if(!junctionTwo.vehicleCounterStarted){
+                    junctionTwo.startCounter();
+                }
+                
+            }
+        }
+
+        // If a vehicle is waiting (or has been seen waiting)
+        if(junctionTwo.isVehicleWaiting() || junctionTwo.triggered){
+      
+            // First check the junction isn't always green
+            if(!junctionTwo.isGreen()){
+                bth.printf("Junction 2: Vehicle Waiting\n");
+                // if it isn't, make sure the other green comes to an end
+                if(safePassageTimer.read() > safePassageTime || (junctionOne.vehicleCounterStarted && junctionOne.surplusVehicleCount >= junctionOne.surplusVehicleLimit)){
+
+                    // If it has, change junction
+                    junctionOne.changeRed();
+
+                    // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
+                    junctionTwo.triggered = true;
+                    
+                    // Before chaning green, make sure suitable time passed.
+                    if(transitionTimer.read()>transitionTime){
+
+                        // If so, change green
+                        junctionTwo.changeGreen();
+                        // Reset Trigger
+                        junctionTwo.triggered = false;
+
+                        //Reset Timers
+                        transitionTimer.stop();
+                        transitionTimer.reset();                    safePassageTimer.stop();
+                        safePassageTimer.reset();
+                        junctionOne.stopCounter();
+
+                    } else if(transitionTimer.read()==0) {
+                        // If not, and the timer has not started, start it
+                        transitionTimer.start();
+                    }
+                } else if (safePassageTimer.read()==0){
+                    // If not, and the timer has not started, start it
+                    safePassageTimer.start();
+                }
+            }
+            if(junctionOne.isGreen()){
+                if(!junctionOne.vehicleCounterStarted){
+                    junctionOne.startCounter();
+                }
+                
+            }
+        }
+
+        if(ped.isPedestrianWaiting()){
+            pedTimer.start();
+        }
+        if(pedTimer.read() > pedWaitLimit){
+            
+            junctionOne.changeRed();
+            junctionTwo.changeRed();
+            transitionTimer.start();
+            if(transitionTimer > transitionTime){
+                pedTimer.stop();
+                pedTimer.reset();
+                transitionTimer.stop();
+                transitionTimer.reset();
+
+                ped.changeGreen();
+                wait(2);
                 junctionOne.changeGreen();
             }
-        } else {
-            // Default Junction One to Green
-            junctionOne.changeGreen();
         }
-        //Update Indicator, replace with general update()
-        junctionOne.sensor.checkForVehicle();
-        junctionTwo.sensor.checkForVehicle();
-
     }
     return 0;
   }
