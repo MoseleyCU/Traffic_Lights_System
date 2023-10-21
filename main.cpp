@@ -155,6 +155,7 @@ class Junction{
         , junctionWaitLimit(_junctionWaitLimit)
         , surplusVehicleLimit(_surplusVehicleLimit){
             triggered = false;
+            vehicleCounterStarted = false;
             previousState = false;
             surplusVehicleCount = 0;
             remoteTrigger = false;
@@ -219,8 +220,8 @@ class Junction{
         
     }
     void startVehicleCounter(){
-        vehicleCounterStarted = true;
-        surplusVehicleCount = 0;
+            vehicleCounterStarted = true;
+            surplusVehicleCount = 0;
     }
     void stopVehicleCounter(){
         vehicleCounterStarted = false;
@@ -421,7 +422,7 @@ int main() {
             //Only when the Junction Two is green and vehicle waiting at Junction One do we set Junction Two to count cars 
             if(junctionTwo.isGreen()){
                 // If the count hasn't started and there is no vehicle waiting (to account for the vehicle waiting)
-                if(!junctionTwo.vehicleCounterStarted & !junctionTwo.isVehicleWaiting()){
+                if(!junctionTwo.vehicleCounterStarted && !junctionTwo.isVehicleWaiting()){
                     junctionTwo.startVehicleCounter();
                 }
                 
@@ -479,7 +480,7 @@ int main() {
             //Only when the Junction One is green and vehicle waiting at Junction Two do we set Junction One to count cars 
             if(junctionOne.isGreen()){
                 // If the count hasn't started and there is no vehicle waiting (to account for the vehicle waiting)
-                if(!junctionOne.vehicleCounterStarted & !junctionOne.isVehicleWaiting()){
+                if(!junctionOne.vehicleCounterStarted && !junctionOne.isVehicleWaiting()){
                     junctionOne.startVehicleCounter();
                 }
                 
