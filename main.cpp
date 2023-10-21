@@ -18,7 +18,7 @@ AnalogIn irRx_J2(p18); // IR Receiver
 DigitalOut ind_J2(p16); // Sensor Indicator
 
 // Pedestrian Crossing
-DigitalIn pedSwitch(p21);  // Pedestrian Request Switch
+InterruptIn pedSwitch(p21);  // Pedestrian Request Switch
 DigitalOut pedRed(p22);  // Red Pedestrian Signal
 DigitalOut pedGreen(p23);  // Green Pedestrian Signal
 BusOut segment(p24,p25,p26,p27,p28,p29,p30); // Pedestrian Timer (e,d,c,g,f,a,b)
@@ -146,6 +146,7 @@ class Junction{
     bool vehicleCounterStarted;
     int surplusVehicleCount;
     int surplusVehicleLimit;
+    bool remoteTrigger;
 
 
     //Constructor
@@ -158,6 +159,7 @@ class Junction{
             triggered = false;
             previousState = false;
             surplusVehicleCount = 0;
+            remoteTrigger = false;
     }
 
     // Accessible method to check state of Junction
@@ -187,9 +189,12 @@ class Junction{
         } else {
             if(previousState){
                 surplusVehicleCount++;
-                if(vehicleCounterStarted){
+                if(isGreen()){
+                   if(vehicleCounterStarted){
                     bth.printf("%s: %i vehicles left to pass.\n",junctionName,(surplusVehicleLimit - surplusVehicleCount));
+                    } 
                 }
+                
                 
                 previousState = false;
             }
@@ -224,26 +229,24 @@ class Junction{
     }
 };
 class PedestrianCrossing {
-    DigitalIn* pedSwitch;
     DigitalOut* pedRedLight;
     DigitalOut* pedGreenLight;
     CharacterHexCodes character;
+    
     bool isGreen;
 
     public:
-    PedestrianCrossing(DigitalIn* _pedSwitch, DigitalOut* _pedRedLight, DigitalOut* _pedGreenLight)
-    : pedSwitch(_pedSwitch)
-    , pedRedLight(_pedRedLight)
+    Timer waitingTimer;
+    bool remoteTrigger;
+    PedestrianCrossing(DigitalOut* _pedRedLight, DigitalOut* _pedGreenLight)
+    : pedRedLight(_pedRedLight)
     , pedGreenLight(_pedGreenLight){
         isGreen = false;
+        remoteTrigger = false;
     }
-
-    bool isPedestrianWaiting(){
-        if (pedSwitch->read()){
-            bth.printf("Pedestrian Waiting.\n");
-            return true;
-        }
-        return false;
+    void StartTimer(){
+        bth.printf("Pedestrian Waiting...\n");
+        waitingTimer.start();
     }
     void changeGreen(){
         *pedRedLight = 0;
@@ -258,6 +261,8 @@ class PedestrianCrossing {
         *pedGreenLight = 0;
         *pedRedLight = 1;
         isGreen = false;
+        waitingTimer.stop();
+        waitingTimer.reset();
         bth.printf("Pedestrian Crossing is Red\n");
     }
     void startCountdown(){
@@ -307,6 +312,14 @@ void startup(){
     }
     bth.printf("Start up complete.\n");
 }
+PedestrianCrossing ped(
+    &pedRed,
+    &pedGreen
+);
+
+void StartPedTimer(){
+    ped.StartTimer();
+}
 
 int main() {
 
@@ -340,12 +353,6 @@ int main() {
         4 // Surplus vehicle limit
     );
 
-    PedestrianCrossing ped(
-        &pedSwitch,
-        &pedRed,
-        &pedGreen
-    );
-
     float safePassageTime = 30;
     float transitionTime = 2;
     float pedWaitLimit = 5;
@@ -353,6 +360,9 @@ int main() {
     Timer safePassageTimer;
     Timer transitionTimer;
     Timer pedTimer;
+
+    // Interrupt Setup
+    pedSwitch.rise(&StartPedTimer);
 
     // Initial Start
     pedRed = 1;
@@ -365,15 +375,20 @@ int main() {
       
             // First check the junction isn't always green
             if(!junctionOne.isGreen()){
-                bth.printf("Junction 1: Vehicle Waiting\n");
+                // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
+                junctionOne.triggered = true;
+
+                //Seperate manual trigger from auto trigger
+                if(junctionOne.isVehicleWaiting() && junctionOne.triggered){
+                    bth.printf("Junction 1: Vehicle Waiting\n");
+                }    
                 // if it isn't, make sure the other green comes to an end
-                if(safePassageTimer.read() > safePassageTime || (junctionTwo.vehicleCounterStarted && junctionTwo.surplusVehicleCount >= junctionTwo.surplusVehicleLimit)){
+                if(safePassageTimer.read() > safePassageTime || (junctionTwo.vehicleCounterStarted && junctionTwo.surplusVehicleCount >= junctionTwo.surplusVehicleLimit) || junctionOne.remoteTrigger){
 
                     // If it has, change junction
                     junctionTwo.changeRed();
 
-                    // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
-                    junctionOne.triggered = true;
+                    
                     
 
                     // Before chaning green, make sure suitable time passed.
@@ -389,6 +404,7 @@ int main() {
                         transitionTimer.reset();                    safePassageTimer.stop();
                         safePassageTimer.reset();
                         junctionTwo.stopCounter();
+                        junctionOne.remoteTrigger = false;
 
                     } else if(transitionTimer.read()==0) {
                         // If not, and the timer has not started, start it
@@ -408,20 +424,24 @@ int main() {
         }
 
         // If a vehicle is waiting (or has been seen waiting)
-        if(junctionTwo.isVehicleWaiting() || junctionTwo.triggered){
+        if(junctionTwo.isVehicleWaiting() || junctionTwo.triggered || junctionTwo.remoteTrigger){
       
             // First check the junction isn't always green
             if(!junctionTwo.isGreen()){
-                bth.printf("Junction 2: Vehicle Waiting\n");
+                // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
+                junctionTwo.triggered = true;
+
+                //Seperate manual trigger from auto trigger
+                if(junctionTwo.isVehicleWaiting() && junctionTwo.triggered){
+                    bth.printf("Junction 2: Vehicle Waiting\n");
+                } 
+
                 // if it isn't, make sure the other green comes to an end
-                if(safePassageTimer.read() > safePassageTime || (junctionOne.vehicleCounterStarted && junctionOne.surplusVehicleCount >= junctionOne.surplusVehicleLimit)){
+                if(safePassageTimer.read() > safePassageTime || (junctionOne.vehicleCounterStarted && junctionOne.surplusVehicleCount >= junctionOne.surplusVehicleLimit) || junctionTwo.remoteTrigger){
 
                     // If it has, change junction
                     junctionOne.changeRed();
 
-                    // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
-                    junctionTwo.triggered = true;
-                    
                     // Before chaning green, make sure suitable time passed.
                     if(transitionTimer.read()>transitionTime){
 
@@ -430,11 +450,15 @@ int main() {
                         // Reset Trigger
                         junctionTwo.triggered = false;
 
+                        //Start timer to transition back
+                        junctionOne.triggered = true;
+
                         //Reset Timers
                         transitionTimer.stop();
                         transitionTimer.reset();                    safePassageTimer.stop();
                         safePassageTimer.reset();
                         junctionOne.stopCounter();
+                        junctionTwo.remoteTrigger = false;
 
                     } else if(transitionTimer.read()==0) {
                         // If not, and the timer has not started, start it
@@ -453,24 +477,37 @@ int main() {
             }
         }
 
-        if(ped.isPedestrianWaiting()){
-            pedTimer.start();
-        }
-        if(pedTimer.read() > pedWaitLimit){
+        if(ped.waitingTimer.read() > pedWaitLimit || ped.remoteTrigger){
             
             junctionOne.changeRed();
             junctionTwo.changeRed();
             transitionTimer.start();
             if(transitionTimer > transitionTime){
-                pedTimer.stop();
-                pedTimer.reset();
                 transitionTimer.stop();
                 transitionTimer.reset();
-
                 ped.changeGreen();
+                ped.remoteTrigger = false;
                 wait(2);
                 junctionOne.changeGreen();
             }
+        }
+        if(bth.readable()){
+            char input = bth.getc();
+            switch (input){
+                case '1':
+                junctionOne.remoteTrigger = true;
+                break;
+                case '2':
+                junctionTwo.remoteTrigger = true;
+                break;
+                case 'P':
+                ped.remoteTrigger = true;
+                break;
+                default:
+                break;
+            }
+            input = NULL;
+            
         }
     }
     return 0;
