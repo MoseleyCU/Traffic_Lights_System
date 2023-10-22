@@ -27,13 +27,13 @@ Serial bth(p9,p10,9600);
 
 // Character Mapping for 7 segment display
 struct CharacterHexCodes {
-    int ZERO, ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE, A, b, C, c, d, E, F, g, G, H, h, i, I, j, L, l, n, N, O, o, p, q, r, S, t, U, u, y;
+    int ZERO, ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE, A, b, C, c, d, E, F, g, G, H, h, i, I, j, L, l, n, N, O, o, p, q, r, S, t, U, u, y, CLEAR;
 
     // Constructor to initialize the mappings
     CharacterHexCodes() {
         ZERO = 0x88; ONE = 0xBB; TWO = 0x94; THREE = 0x91; FOUR = 0xA3; FIVE = 0xC1; SIX = 0xC0; SEVEN = 0x9B; EIGHT = 0x80; NINE = 0x81; A = 0x82; b = 0xE0; C = 0xCC; 
         c = 0xF4; d = 0xB0; E = 0xC4; F = 0xC6; g = 0x81; G = 0xC8; H = 0xA2; h = 0xE2; i = 0xDB; I = 0xBB; j = 0xD9; L = 0xEC; l = 0xEE; n = 0xF2; N = 0x8A; O = 0x88; 
-        o = 0xF0; p = 0x86; q = 0x83; r = 0xF6; S = 0xC1; t = 0xE4; U = 0xA8; u = 0xF8; y = 0xA1;
+        o = 0xF0; p = 0x86; q = 0x83; r = 0xF6; S = 0xC1; t = 0xE4; U = 0xA8; u = 0xF8; y = 0xA1; CLEAR = 0xFF;
     }
 };
 
@@ -44,7 +44,7 @@ class TL_Sensor{
     DigitalOut* irEmitter;
     AnalogIn* irReceiver;
     DigitalOut* indicator;
-
+    const float sensitivity; // Presense Sensor Sensivitity
     // To account for Ambient IR light 
     float measureAmbient(){
             float ambientReading;
@@ -68,8 +68,6 @@ class TL_Sensor{
     }
 
     public:
-    float sensitivity; // Presense Sensor Sensivitity, can be changed on the fly, for example with the use of a potentiometer.
-
     // Constructor
         TL_Sensor(DigitalOut* _irEmitter, AnalogIn* _irReceiver, DigitalOut* _indicator, float _sensitivity)
     : irEmitter(_irEmitter)
@@ -133,17 +131,19 @@ class TL_Signal{
 };
 
 class Junction{
-    public:
-    string junctionName; //Name of the Junction, used for monitoring
+    private:
     TL_Sensor sensor; //Instance of the Presence sensor object
     TL_Signal signal; //Instance of the Traffic Light Signals object
+    const int surplusVehicleLimit; // Max vehicle count (while other junction waiting)
+    const string junctionName; //Name of the Junction, used for monitoring
     Timer junctionTimer; // Measure time vehicle waiting
     float junctionWaitLimit; // Time a vehicle needs to wait before registering as a Waiting Vehicle.
-    bool triggered; // Flag variable for triggering junction without vehicle waiting.
-    bool previousState; // Temp variable for holding previous state of junction (for counting vehicles)
+    bool previousSensorState; // Temp variable for holding previous state of junction (for counting vehicles)
+
+    public:
+    bool changeTriggered; // Flag variable for triggering junction without vehicle waiting.
     bool vehicleCounterStarted; // Flag for enabling/disabling vehicle counting.
     int surplusVehicleCount; // Current vehicle count (while other junction waiting)
-    int surplusVehicleLimit; // Max vehicle count (while other junction waiting)
     bool remoteTrigger; // Allows for bluetooth override
 
 
@@ -154,9 +154,9 @@ class Junction{
         , signal(_redLight,_greenLight)
         , junctionWaitLimit(_junctionWaitLimit)
         , surplusVehicleLimit(_surplusVehicleLimit){
-            triggered = false;
+            changeTriggered = false;
             vehicleCounterStarted = false;
-            previousState = false;
+            previousSensorState = false;
             surplusVehicleCount = 0;
             remoteTrigger = false;
     }
@@ -170,7 +170,7 @@ class Junction{
         //Check presence sensor
         if(sensor.checkForVehicle()){
             //Vehicle spotted
-            previousState = true;
+            previousSensorState = true;
             //Check if Timer started
             if((junctionTimer.read()==0)){
                 //If a vehicle shows up, start a timer.    
@@ -187,14 +187,14 @@ class Junction{
 
         } else {
             //Count vehicles
-            if(previousState){
+            if(previousSensorState){
                 surplusVehicleCount++;
                 if(isGreen()){
                    if(vehicleCounterStarted){
                     bth.printf("%s: %i vehicles left to pass.\n",junctionName,(surplusVehicleLimit - surplusVehicleCount));
                     } 
                 }
-                previousState = false;
+                previousSensorState = false;
             }
 
             //If there is no vehicle waiting any more, reset the timer.
@@ -230,41 +230,11 @@ class Junction{
 
 class PedestrianCrossing {
     private:
-    DigitalOut* pedRedLight;
-    DigitalOut* pedGreenLight;
+    DigitalOut* Red_Light;
+    DigitalOut* Green_Light;
     CharacterHexCodes character;
     bool isGreen;
 
-    public:
-    Timer waitingTimer;
-    bool remoteTrigger;
-
-    PedestrianCrossing(DigitalOut* _pedRedLight, DigitalOut* _pedGreenLight)
-    : pedRedLight(_pedRedLight)
-    , pedGreenLight(_pedGreenLight){
-        isGreen = false;
-        remoteTrigger = false;
-    }
-    void StartWaitingTimer(){
-        bth.printf("Pedestrian Waiting...\n");
-        waitingTimer.start();
-    }
-    void changeGreen(){
-        *pedRedLight = 0;
-        *pedGreenLight = 1;
-        isGreen = true;
-        bth.printf("Pedestrian Crossing is Green\n");
-        startCountdown();
-        changeRed();
-    }
-    void changeRed(){
-        *pedGreenLight = 0;
-        *pedRedLight = 1;
-        isGreen = false;
-        waitingTimer.stop();
-        waitingTimer.reset();
-        bth.printf("Pedestrian Crossing is Red\n");
-    }
     void startCountdown(){
         bth.printf("Starting Pedestrian Countdown\n");
         for(int i = 9;i>=0;i--){
@@ -283,7 +253,38 @@ class PedestrianCrossing {
             }
             wait(1); // Wait is used here as a safety feature (we don't want accidental trigger of the lights)
         }
-        segment = 0xFF; // Clear 7 seg
+        segment = character.CLEAR; // Clear 7 seg
+    }
+
+    public:
+    Timer waitingTimer;
+    bool remoteTrigger;
+
+    PedestrianCrossing(DigitalOut* _pedRedLight, DigitalOut* _pedGreenLight)
+    : Red_Light(_pedRedLight)
+    , Green_Light(_pedGreenLight){
+        isGreen = false;
+        remoteTrigger = false;
+    }
+    void StartWaitingTimer(){
+        bth.printf("Pedestrian Waiting...\n");
+        waitingTimer.start();
+    }
+    void changeGreen(){
+        *Red_Light = 0;
+        *Green_Light = 1;
+        isGreen = true;
+        bth.printf("Pedestrian Crossing is Green\n");
+        startCountdown();
+        changeRed();
+    }
+    void changeRed(){
+        *Green_Light = 0;
+        *Red_Light = 1;
+        isGreen = false;
+        waitingTimer.stop();
+        waitingTimer.reset();
+        bth.printf("Pedestrian Crossing is Red\n");
     }
 };
 
@@ -373,16 +374,16 @@ int main() {
 
     while(1){
         // If a vehicle is waiting (or has been seen waiting)
-        if(junctionOne.isVehicleWaiting() || junctionOne.triggered || junctionTwo.remoteTrigger){
+        if(junctionOne.isVehicleWaiting() || junctionOne.changeTriggered || junctionTwo.remoteTrigger){
       
             // First check the junction isn't already green
             if(!junctionOne.isGreen()){
                 // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
                 // This stops the lights from staying red.
-                junctionOne.triggered = true;
+                junctionOne.changeTriggered = true;
 
                 //Only log a waiting vehicle is there is still a vehicle and the junction is triggered.
-                if(junctionOne.isVehicleWaiting() && junctionOne.triggered){
+                if(junctionOne.isVehicleWaiting() && junctionOne.changeTriggered){
                     bth.printf("Junction 1: Vehicle Waiting\n");
                 }    
                 
@@ -399,7 +400,7 @@ int main() {
                         // If so, change green
                         junctionOne.changeGreen();
                         // Reset Trigger
-                        junctionOne.triggered = false;
+                        junctionOne.changeTriggered = false;
 
                         //Reset Timers and counters and reset remote trigger
                         transitionTimer.stop();
@@ -430,15 +431,15 @@ int main() {
         }
 
         // If a vehicle is waiting (or has been seen waiting) or is remotely triggered.
-        if(junctionTwo.isVehicleWaiting() || junctionTwo.triggered || junctionTwo.remoteTrigger){
+        if(junctionTwo.isVehicleWaiting() || junctionTwo.changeTriggered || junctionTwo.remoteTrigger){
             // First check the junction isn't already green
             if(!junctionTwo.isGreen()){
                 // Set the light change in motion, regardless if there is no longer a vehicle at the junction.
                 // This stops the lights from staying red.
-                junctionTwo.triggered = true;
+                junctionTwo.changeTriggered = true;
 
                 //Only log a waiting vehicle is there is still a vehicle and the junction is triggered.
-                if(junctionTwo.isVehicleWaiting() && junctionTwo.triggered){
+                if(junctionTwo.isVehicleWaiting() && junctionTwo.changeTriggered){
                     bth.printf("Junction 2: Vehicle Waiting\n");
                 } 
 
@@ -454,10 +455,10 @@ int main() {
                         // If so, change green
                         junctionTwo.changeGreen();
                         // Reset Trigger
-                        junctionTwo.triggered = false;
+                        junctionTwo.changeTriggered = false;
 
                         //Start timer to transition back, this makes it so Junction One is the primarily green.
-                        junctionOne.triggered = true;
+                        junctionOne.changeTriggered = true;
 
                         //Reset Timers and counters and reset remote trigger
                         transitionTimer.stop();
