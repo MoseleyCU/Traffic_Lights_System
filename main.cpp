@@ -24,19 +24,6 @@ BusOut segment(p24,p25,p26,p27,p28,p29,p30); // Pedestrian Timer (e,d,c,g,f,a,b)
 // Bluetooth Adapter
 Serial bth(p9,p10,9600);
 
-
-// Character Mapping for 7 segment display
-struct CharacterHexCodes {
-    int ZERO, ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE, A, b, C, c, d, E, F, g, G, H, h, i, I, j, L, l, n, N, O, o, p, q, r, S, t, U, u, y, CLEAR;
-
-    // Constructor to initialize the mappings
-    CharacterHexCodes() {
-        ZERO = 0x88; ONE = 0xBB; TWO = 0x94; THREE = 0x91; FOUR = 0xA3; FIVE = 0xC1; SIX = 0xC0; SEVEN = 0x9B; EIGHT = 0x80; NINE = 0x81; A = 0x82; b = 0xE0; C = 0xCC; 
-        c = 0xF4; d = 0xB0; E = 0xC4; F = 0xC6; g = 0x81; G = 0xC8; H = 0xA2; h = 0xE2; i = 0xDB; I = 0xBB; j = 0xD9; L = 0xEC; l = 0xEE; n = 0xF2; N = 0x8A; O = 0x88; 
-        o = 0xF0; p = 0x86; q = 0x83; r = 0xF6; S = 0xC1; t = 0xE4; U = 0xA8; u = 0xF8; y = 0xA1; CLEAR = 0xFF;
-    }
-};
-
 // Class for the Presence Sensor
 class TL_Sensor{
     private:
@@ -48,22 +35,18 @@ class TL_Sensor{
     // To account for Ambient IR light 
     float measureAmbient(){
             float ambientReading;
-            //Turn off emitter to read ambient
-            *irEmitter = 0;
-            //Wait for emitter to turn off completely
-            wait(0.1);
             ambientReading = irReceiver->read();
+            //Turn emitter on
+            *irEmitter = 1;
             return ambientReading;
     }
 
     float takeReadingFloat(){
         float ambient = measureAmbient();
-        //Turn on emitter
-        *irEmitter = 1;
-        //wait for emitter to power reach max brightness
-        wait(0.1);
         //Take the current IR reading, discounting the ambient IR light.
         float current = irReceiver->read() - ambient; 
+        //Turn off emitter
+        *irEmitter = 0;
         return current;
     }
 
@@ -83,7 +66,6 @@ class TL_Sensor{
     // Method for reporting back if a Vehicle is detected.
     // Does not implement any timing logic here. 
     bool checkForVehicle(){
-        
         if(takeReadingFloat() > sensitivity){
             *indicator = 1;
             return true;
@@ -96,7 +78,6 @@ class TL_Sensor{
 
 
 };
-
 // Class for the Signal Lamps
 class TL_Signal{
     friend class Junction; // Allow Junction class to access private members
@@ -129,7 +110,7 @@ class TL_Signal{
             isGreen = false;
         }
 };
-
+//Class for the entire Junction
 class Junction{
     private:
     TL_Sensor sensor; //Instance of the Presence sensor object
@@ -228,6 +209,18 @@ class Junction{
     }
 };
 
+// Character Mapping for 7 segment display
+struct CharacterHexCodes {
+    int ZERO, ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE, A, b, C, c, d, E, F, g, G, H, h, i, I, j, L, l, n, N, O, o, p, q, r, S, t, U, u, y, CLEAR;
+
+    // Constructor to initialize the mappings
+    CharacterHexCodes() {
+        ZERO = 0x88; ONE = 0xBB; TWO = 0x94; THREE = 0x91; FOUR = 0xA3; FIVE = 0xC1; SIX = 0xC0; SEVEN = 0x9B; EIGHT = 0x80; NINE = 0x81; A = 0x82; b = 0xE0; C = 0xCC; 
+        c = 0xF4; d = 0xB0; E = 0xC4; F = 0xC6; g = 0x81; G = 0xC8; H = 0xA2; h = 0xE2; i = 0xDB; I = 0xBB; j = 0xD9; L = 0xEC; l = 0xEE; n = 0xF2; N = 0x8A; O = 0x88; 
+        o = 0xF0; p = 0x86; q = 0x83; r = 0xF6; S = 0xC1; t = 0xE4; U = 0xA8; u = 0xF8; y = 0xA1; CLEAR = 0xFF;
+    }
+};
+
 class PedestrianCrossing {
     private:
     DigitalOut* Red_Light;
@@ -288,6 +281,7 @@ class PedestrianCrossing {
     }
 };
 
+// Start up function, for cycling through the lights
 void startup(){
     bth.printf("Starting up...\n");
     int setup = 1;
@@ -319,7 +313,7 @@ PedestrianCrossing ped(
     &pedGreen
 );
 
-//Interrupt function
+//Interrupt function for pedestrian Crossing
 void StartPedTimer(){ //
     ped.StartWaitingTimer();
 }
