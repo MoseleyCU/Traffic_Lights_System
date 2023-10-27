@@ -349,7 +349,6 @@ int main() {
     Timer transitionTimer;
     float transitionTime = 2; // How long all lights red between transitions
 
-    Timer pedTimer;
     float pedWaitLimit = 5; // How long a pedestrian waits before changing.
 
     Timer timeoutJunctionTimer;
